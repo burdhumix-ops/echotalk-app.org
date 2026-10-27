@@ -1,0 +1,6 @@
+{
+  "name": "EchoTalk",
+  "description": "iOS-inspired real-time chat, live audio rooms, arcade hub with Chess and Ludo, and multi-turn Gemini AI assistant.",
+  "requestFramePermissions": ["RECORD_AUDIO"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

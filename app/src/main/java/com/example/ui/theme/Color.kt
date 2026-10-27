@@ -1,0 +1,60 @@
+package com.example.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+// 1. Classic (Default Light)
+val ClassicBg = Color(0xFFF8F9FA)
+val ClassicSurface = Color(0xFFFFFFFF)
+val ClassicCard = Color(0xFFFFFFFF)
+val ClassicText = Color(0xFF111827)
+val ClassicTextMuted = Color(0xFF6B7280)
+val ClassicAccent = Color(0xFF2563EB)
+val ClassicBorder = Color(0x1A000000)
+
+// 2. iOS Glassmorphism (Dark Translucent)
+val IosGlassBg = Color(0xFF0B0F17)
+val IosGlassSurface = Color(0xEB0F172A)
+val IosGlassCard = Color(0x1AFFFFFF)
+val IosGlassText = Color(0xFFF1F5F9)
+val IosGlassTextMuted = Color(0xFF94A3B8)
+val IosGlassAccent = Color(0xFF6366F1)
+val IosGlassBorder = Color(0x1AFFFFFF)
+
+// 3. Warm Sand & Cream (Fresh Soft)
+val WarmSandBg = Color(0xFFFDFBF7)
+val WarmSandSurface = Color(0xFFF5EBE0)
+val WarmSandCard = Color(0xFFF5EBE0)
+val WarmSandText = Color(0xFF3D2C2E)
+val WarmSandTextMuted = Color(0xFF785954)
+val WarmSandAccent = Color(0xFFC86448)
+val WarmSandBorder = Color(0x26C86448)
+
+// 4. Midnight Emerald (Rich Dark)
+val EmeraldBg = Color(0xFF0D1B1E)
+val EmeraldSurface = Color(0xFF162A2D)
+val EmeraldCard = Color(0xFF162A2D)
+val EmeraldText = Color(0xFFECFDF5)
+val EmeraldTextMuted = Color(0xFF86EFAC)
+val EmeraldAccent = Color(0xFF10B981)
+val EmeraldBorder = Color(0x2610B981)
+
+// 5. Obsidian Pure Dark (OLED Black)
+val ObsidianBg = Color(0xFF000000)
+val ObsidianSurface = Color(0xFF121212)
+val ObsidianCard = Color(0xFF121212)
+val ObsidianText = Color(0xFFFFFFFF)
+val ObsidianTextMuted = Color(0xFFA1A1AA)
+val ObsidianAccent = Color(0xFF8B5CF6)
+val ObsidianBorder = Color(0x268B5CF6)
+
+// 6. Velvet Rose Gold & Midnight Slate
+val VelvetMidnightSlateBg = Color(0xFF0F0E17)
+val VelvetCharcoalSurface = Color(0xFF1A1822)
+val VelvetCharcoalCard = Color(0xFF221F2C)
+val VelvetRoseGoldPrimary = Color(0xFFE8A5C8)
+val VelvetRoseGoldSecondary = Color(0xFFE287B2)
+val VelvetGoldAccent = Color(0xFFD4AF37)
+val VelvetChampagneText = Color(0xFFFFFFF0)
+val VelvetBlushTextMuted = Color(0xFFC4A1B3)
+val VelvetBorder = Color(0x33E8A5C8)
+
