@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import com.example.utils.PoliteSoundSynthesizer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -166,17 +169,16 @@ fun DMsScreen(
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Top Header Bar
+            // Borderless Messenger-Inspired Top Header Bar
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp,
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                tonalElevation = 0.dp
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -185,8 +187,11 @@ fun DMsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        IconButton(onClick = { repository.setActivePartner(null) }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                        IconButton(
+                            onClick = { repository.setActivePartner(null) },
+                            modifier = Modifier.springButton()
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
                         }
 
                         // Partner Avatar
@@ -195,7 +200,7 @@ fun DMsScreen(
                                 .size(36.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-                                .clickable { onViewProfile(activePartner) },
+                                .springButton(onClick = { onViewProfile(activePartner) }),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -252,6 +257,7 @@ fun DMsScreen(
                                 .size(34.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isPageTranslationOn) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                .springButton()
                         ) {
                             Icon(
                                 Icons.Default.Translate,
@@ -261,42 +267,53 @@ fun DMsScreen(
                             )
                         }
 
-                        // Cloud Firestore Chat Mode (Real-time Firestore)
+                        // Mutual Acceptance Gate: Audio (📞) and Video (📹) calls remain disabled (opacity: 0.4) until mutual friendship is accepted
                         IconButton(
-                            onClick = { showFirestoreChatScreen = true },
+                            onClick = {
+                                if (activePartner.isFriend) {
+                                    activeCallType = "audio"
+                                }
+                            },
+                            enabled = activePartner.isFriend,
                             modifier = Modifier
                                 .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .graphicsLayer { alpha = if (activePartner.isFriend) 1.0f else 0.4f }
+                                .springButton(enabled = activePartner.isFriend)
                         ) {
                             Icon(
-                                Icons.Default.Cloud,
-                                contentDescription = "Cloud Firestore Chat",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(16.dp)
+                                Icons.Default.Phone,
+                                contentDescription = "Audio Call",
+                                tint = if (activePartner.isFriend) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        // Mutual Acceptance Gate: Audio (📞) and Video (📹) calls enabled ONLY when mutual friends
-                        if (activePartner.isFriend) {
-                            IconButton(
-                                onClick = { activeCallType = "audio" },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(Icons.Default.Phone, contentDescription = "Audio Call", tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
-                            }
-                            IconButton(
-                                onClick = { activeCallType = "video" },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(Icons.Default.Videocam, contentDescription = "Video Call", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            }
+                        IconButton(
+                            onClick = {
+                                if (activePartner.isFriend) {
+                                    activeCallType = "video"
+                                }
+                            },
+                            enabled = activePartner.isFriend,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .graphicsLayer { alpha = if (activePartner.isFriend) 1.0f else 0.4f }
+                                .springButton(enabled = activePartner.isFriend)
+                        ) {
+                            Icon(
+                                Icons.Default.Videocam,
+                                contentDescription = "Video Call",
+                                tint = if (activePartner.isFriend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
 
                         // Custom Bubble Accent Selector Button
                         IconButton(
                             onClick = { showAccentPicker = true },
-                            modifier = Modifier.size(34.dp)
+                            modifier = Modifier
+                                .size(34.dp)
+                                .springButton()
                         ) {
                             Icon(Icons.Default.Palette, contentDescription = "Accent Color", tint = bubbleAccent.color, modifier = Modifier.size(18.dp))
                         }
@@ -304,7 +321,9 @@ fun DMsScreen(
                         // Custom Chat Wallpaper Selector Button
                         IconButton(
                             onClick = { showBackgroundDialog = true },
-                            modifier = Modifier.size(34.dp)
+                            modifier = Modifier
+                                .size(34.dp)
+                                .springButton()
                         ) {
                             Icon(Icons.Default.Wallpaper, contentDescription = "Wallpaper", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                         }
@@ -525,10 +544,12 @@ fun DMsScreen(
                                         detectTapGestures(
                                             onDoubleTap = {
                                                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                PoliteSoundSynthesizer.playPopSound()
                                                 selectedMessageForMenu = msg
                                             },
                                             onLongPress = {
                                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                PoliteSoundSynthesizer.playPopSound()
                                                 selectedMessageForMenu = msg
                                             }
                                         )
@@ -696,6 +717,7 @@ fun DMsScreen(
                                         audioDuration = durationStr,
                                         isViewOnce = isSendViewOnce
                                     )
+                                    PoliteSoundSynthesizer.playPoliteSendSound()
                                     isSendViewOnce = false
                                 }
                             ) {
@@ -736,8 +758,9 @@ fun DMsScreen(
                     Surface(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                repository.sendDM(recipientId = activePartner.id, text = chip)
+                            .springButton {
+                                val (ok, _) = repository.sendDM(recipientId = activePartner.id, text = chip)
+                                if (ok) PoliteSoundSynthesizer.playPoliteSendSound()
                             },
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant
@@ -757,12 +780,24 @@ fun DMsScreen(
                             "Replying to ${replyingToMessage!!.sender}: \"${replyingToMessage!!.text.take(30)}\"\n${messageText.trim()}"
                         } else messageText.trim()
 
+                        if (isSendViewOnce) {
+                            com.example.worker.SecurityVaultScanWorker.enqueueScan(
+                                context = context,
+                                entryId = "sec-${System.currentTimeMillis()}",
+                                mediaUrl = "view_once_flame_capture",
+                                sender = currentUser.name,
+                                target = activePartner.name,
+                                isViewOnce = true
+                            )
+                        }
+
                         val (ok, err) = repository.sendDM(
                             recipientId = activePartner.id,
                             text = textToSend,
                             isViewOnce = isSendViewOnce
                         )
                         if (ok) {
+                            PoliteSoundSynthesizer.playPoliteSendSound()
                             messageText = ""
                             isSendViewOnce = false
                             replyingToMessage = null
@@ -778,7 +813,11 @@ fun DMsScreen(
                         text = "👍",
                         isViewOnce = false
                     )
-                    if (!ok) sendErrorMessage = err
+                    if (ok) {
+                        PoliteSoundSynthesizer.playPoliteSendSound()
+                    } else {
+                        sendErrorMessage = err
+                    }
                 },
                 isSendViewOnce = isSendViewOnce,
                 onToggleViewOnce = { isSendViewOnce = !isSendViewOnce },
@@ -849,6 +888,7 @@ fun DMsScreen(
                             mediaUrl = "edited_photo",
                             isViewOnce = viewOnce
                         )
+                        PoliteSoundSynthesizer.playPoliteSendSound()
                     },
                     onDismiss = { showPhotoEditorDialog = false }
                 )
@@ -866,6 +906,7 @@ fun DMsScreen(
                             isDoodle = true,
                             isViewOnce = viewOnce
                         )
+                        PoliteSoundSynthesizer.playPoliteSendSound()
                     }
                 )
             }
@@ -961,67 +1002,127 @@ fun DMsScreen(
         }
     } else {
         // -------------------------------------------------------------
-        // MESSENGER-INSPIRED DM LIST REFACTOR
+        // BORDERLESS MESSENGER-INSPIRED DM LIST REFACTOR
         // -------------------------------------------------------------
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Column(
+            modifier = Modifier.fillMaxSize()
         ) {
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-
+            // Clean, borderless header container with backdrop blur styling
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                tonalElevation = 0.dp,
+                border = null
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "Direct Messages",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.02).sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "${acceptedPartners.size} active chats • ${requestPartners.size} requests",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Navigation toggle icon: message-square (Forum) in DM list view
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                                .springButton { /* Active DM list tab indicator */ },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Forum,
+                                contentDescription = "Direct Messages",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = "Direct Messages",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.02).sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${acceptedPartners.size} active chats • ${requestPartners.size} requests",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Dynamic action buttons
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Theme Selector (palette)
+                        IconButton(
+                            onClick = { showBackgroundDialog = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .springButton { showBackgroundDialog = true }
+                        ) {
+                            Icon(
+                                Icons.Default.Palette,
+                                contentDescription = "Theme Selector",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(10.dp))
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                // Top Header Pill Navigation: Chats (N) / Requests (N)
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp)),
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ) {
-                    Row(
+                    // Navigation Pill Tabs: Chats (N) / Requests (N)
+                    // Borderless segmented pill selector
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            .clip(RoundedCornerShape(20.dp)),
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color.White.copy(alpha = 0.05f),
+                        border = null
                     ) {
-                        val isChats = activeSection == "chats"
-                        Surface(
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable { activeSection = "chats" },
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isChats) MaterialTheme.colorScheme.primary else Color.Transparent
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            val isChats = activeSection == "chats"
+                            // Chats Pill with High-contrast gradient fill when active
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .then(
+                                        if (isChats) Modifier.background(
+                                            Brush.horizontalGradient(
+                                                listOf(Color(0xFFE8A5C8), Color(0xFF6366F1))
+                                            )
+                                        ) else Modifier.background(Color.Transparent)
+                                    )
+                                    .springButton { activeSection = "chats" }
+                                    .padding(vertical = 9.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -1031,267 +1132,312 @@ fun DMsScreen(
                                     color = if (isChats) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                        }
 
-                        val isRequests = activeSection == "requests"
+                            val isRequests = activeSection == "requests"
+                            // Requests Pill with High-contrast gradient fill when active
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .then(
+                                        if (isRequests) Modifier.background(
+                                            Brush.horizontalGradient(
+                                                listOf(Color(0xFFE8A5C8), Color(0xFF6366F1))
+                                            )
+                                        ) else Modifier.background(Color.Transparent)
+                                    )
+                                    .springButton { activeSection = "requests" }
+                                    .padding(vertical = 9.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Requests",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isRequests) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (requestPartners.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isRequests) Color.White else Color(0xFFFBBF24)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "${requestPartners.size}",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.Black
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Borderless search input bar (background: rgba(255, 255, 255, 0.05))
+                    TextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = {
+                            Text(
+                                text = "Search conversations...",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { searchQuery = "" },
+                                    modifier = Modifier.size(24.dp).springButton { searchQuery = "" }
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.05f)),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.White.copy(alpha = 0.05f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                            disabledContainerColor = Color.White.copy(alpha = 0.05f),
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        ),
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                if (filteredPartners.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (activeSection == "chats") "No active chats found." else "No pending message requests.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    items(filteredPartners, key = { it.id }) { partner ->
+                        val thread = dms[partner.id] ?: emptyList()
+                        val lastMsg = thread.lastOrNull()
+                        val isRequest = activeSection == "requests"
+                        val hasUnread = lastMsg != null && lastMsg.sender != currentUser.name && lastMsg.status != "seen"
+
+                        // Borderless Conversation Item Card: Translucent glass card, zero border lines, GPU spring
                         Surface(
                             modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
                                 .clip(RoundedCornerShape(16.dp))
-                                .clickable { activeSection = "requests" },
+                                .springCard {
+                                    if (hasUnread) {
+                                        PoliteSoundSynthesizer.playPoliteReceiveSound()
+                                    }
+                                    repository.setActivePartner(partner.id)
+                                },
                             shape = RoundedCornerShape(16.dp),
-                            color = if (isRequests) MaterialTheme.colorScheme.primary else Color.Transparent
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = null,
+                            tonalElevation = 0.dp
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Requests",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isRequests) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                if (requestPartners.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .size(18.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isRequests) Color.White else Color(0xFFFBBF24)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "${requestPartners.size}",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.Black
-                                        )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    // Avatar with active green online dot (#10B981) positioned at bottom-right
+                                    Box(modifier = Modifier.size(48.dp)) {
+                                        if (partner.avatarUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = partner.avatarUrl,
+                                                contentDescription = partner.name,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(CircleShape)
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = partner.name.take(1),
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+                                        if (partner.online) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(13.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF10B981))
+                                                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                                    .align(Alignment.BottomEnd)
+                                            )
+                                        }
                                     }
-                                }
-                            }
-                        }
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Full-Width Search Input (rgba(255, 255, 255, 0.06), rounded 12dp)
-                TextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = {
-                        Text(
-                            text = "Search conversations...",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Clear search",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White.copy(alpha = 0.06f)),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.White.copy(alpha = 0.06f),
-                        unfocusedContainerColor = Color.White.copy(alpha = 0.06f),
-                        disabledContainerColor = Color.White.copy(alpha = 0.06f),
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    ),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            if (filteredPartners.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (activeSection == "chats") "No active chats found." else "No pending message requests.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            } else {
-                items(filteredPartners, key = { it.id }) { partner ->
-                    val thread = dms[partner.id] ?: emptyList()
-                    val lastMsg = thread.lastOrNull()
-                    val isRequest = activeSection == "requests"
-
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                            .clickable { repository.setActivePartner(partner.id) },
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 2.dp
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                // Avatar with green online dot indicator (#10B981)
-                                Box(modifier = Modifier.size(48.dp)) {
-                                    if (partner.avatarUrl.isNotBlank()) {
-                                        AsyncImage(
-                                            model = partner.avatarUrl,
-                                            contentDescription = partner.name,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(CircleShape)
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
-                                            contentAlignment = Alignment.Center
+                                    // User Identity Stack + Secondary Details Line
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Text(
-                                                text = partner.name.take(1),
-                                                fontSize = 18.sp,
+                                                text = partner.name,
+                                                fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1
                                             )
+                                            if (partner.isVerified) {
+                                                BlueTickBadge(size = 14.dp)
+                                            }
+                                            if (isRequest) {
+                                                Text(
+                                                    text = "${partner.reqCount}/3 msgs",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFFFBBF24),
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(Color(0x33FBBF24))
+                                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
                                         }
-                                    }
-                                    if (partner.online) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(13.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF10B981))
-                                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
-                                                .align(Alignment.BottomEnd)
-                                        )
-                                    }
-                                }
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+
+                                        val previewText = when {
+                                            lastMsg == null -> "${getCountryFlag(partner.countryCode)} ${partner.country} • ${partner.handle}"
+                                            lastMsg.isAudio -> "🎙️ Voice Note (${lastMsg.audioDuration ?: "0:05"})"
+                                            lastMsg.isViewOnce -> "🔥 View Once Secret Photo"
+                                            lastMsg.isDoodle -> "🎨 Doodle Artwork"
+                                            lastMsg.isChallenge -> "🎮 1v1 Match Challenge"
+                                            else -> lastMsg.text
+                                        }
+
                                         Text(
-                                            text = partner.name,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface,
+                                            text = previewText,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1
                                         )
-                                        if (partner.isVerified) {
-                                            BlueTickBadge(size = 14.dp)
+                                    }
+                                }
+
+                                // Trailing Indicators: timestamp + rose gold unread status dot (#E8A5C8)
+                                if (isRequest) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(
+                                            onClick = { repository.acceptRequest(partner.id) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.springButton { repository.acceptRequest(partner.id) }
+                                        ) {
+                                            Text("Accept", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                         }
-                                        if (isRequest) {
-                                            Text(
-                                                text = "${partner.reqCount}/3 msgs",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFFFBBF24),
+                                        OutlinedButton(
+                                            onClick = { repository.declineRequest(partner.id) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.springButton { repository.declineRequest(partner.id) }
+                                        ) {
+                                            Text("Decline", fontSize = 11.sp)
+                                        }
+                                    }
+                                } else {
+                                    Column(
+                                        horizontalAlignment = Alignment.End,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        val displayTimestamp = when {
+                                            lastMsg == null -> "Active"
+                                            lastMsg.timestamp.contains("T") -> {
+                                                try {
+                                                    lastMsg.timestamp.substringAfter("T").take(5)
+                                                } catch (e: Exception) {
+                                                    lastMsg.timestamp
+                                                }
+                                            }
+                                            lastMsg.timestamp.isNotBlank() -> lastMsg.timestamp
+                                            else -> "10:42 AM"
+                                        }
+
+                                        Text(
+                                            text = displayTimestamp,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                        )
+
+                                        if (hasUnread) {
+                                            Box(
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(Color(0x33FBBF24))
-                                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFE8A5C8))
                                             )
                                         }
                                     }
-
-                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                    val previewText = when {
-                                        lastMsg == null -> "${getCountryFlag(partner.countryCode)} ${partner.country} • ${partner.handle}"
-                                        lastMsg.isAudio -> "🎙️ Voice Note (${lastMsg.audioDuration ?: "0:05"})"
-                                        lastMsg.isViewOnce -> "🔥 View Once Secret Photo"
-                                        lastMsg.isDoodle -> "🎨 Doodle Artwork"
-                                        lastMsg.isChallenge -> "🎮 1v1 Match Challenge"
-                                        else -> lastMsg.text
-                                    }
-
-                                    Text(
-                                        text = previewText,
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
-                                    )
                                 }
-                            }
-
-                            if (isRequest) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(
-                                        onClick = { repository.acceptRequest(partner.id) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Accept", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { repository.declineRequest(partner.id) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Decline", fontSize = 11.sp)
-                                    }
-                                }
-                            } else {
-                                Icon(
-                                    Icons.Default.ChevronRight,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(20.dp)
-                                )
                             }
                         }
                     }
                 }
-            }
 
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
         }
     }

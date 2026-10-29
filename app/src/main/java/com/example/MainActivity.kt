@@ -33,6 +33,13 @@ class MainActivity : ComponentActivity() {
         // STEP 2: Initialize Firestore client via DatabaseModule for real-time chat data storage
         DatabaseModule.provideFirestore(this)
 
+        // STEP 3: Initialize Room database for local chat message caching and offline queue
+        val roomDb = com.example.data.local.AppRoomDatabase.getInstance(this)
+        repository.setRoomDatabase(roomDb)
+        val queueMgr = com.example.data.local.OfflineQueueManager.getInstance(this)
+        repository.setOfflineQueueManager(queueMgr)
+        com.example.fcm.FcmNotificationManager.initialize(this)
+
         enableEdgeToEdge()
 
         setContent {

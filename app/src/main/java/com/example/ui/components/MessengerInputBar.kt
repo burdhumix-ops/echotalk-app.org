@@ -57,7 +57,6 @@ fun MessengerInputBar(
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
             .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         // Reply Quote Banner if replying
         if (replyingToText != null) {
@@ -278,6 +277,7 @@ fun MessengerInputBar(
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
+                            .springButton(enabled = !isInputBlocked)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
@@ -298,6 +298,7 @@ fun MessengerInputBar(
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                            .springButton(enabled = !isInputBlocked)
                     ) {
                         Text("👍", fontSize = 18.sp)
                     }

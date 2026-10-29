@@ -69,6 +69,9 @@ fun ChatScreen(
             DatabaseModule.observeDirectMessages(currentUser.id, recipientId).collect { msgs ->
                 if (msgs.isNotEmpty()) {
                     firestoreMessages = msgs
+                    msgs.forEach { msg ->
+                        repository.cacheIncomingMessage(recipientId, msg)
+                    }
                 }
             }
         } catch (e: Exception) {

@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -639,7 +640,9 @@ fun ChessGameView(mode: String, opponent: String?) {
         "chess_match_$cleanOpp"
     }
 
-    var board by remember { mutableStateOf(ChessEngine.initialBoard.map { it.clone() }.toTypedArray()) }
+    var currentFen by remember { mutableStateOf(ChessBoardManager.STARTING_FEN) }
+    var boardState by remember { mutableStateOf(ChessBoardManager.parseFen(currentFen)) }
+    var board by remember { mutableStateOf(boardState.board) }
     var selectedSquare by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var turn by remember { mutableStateOf("White") } // White or Black
     var capturedWhite by remember { mutableStateOf(listOf<String>()) }
@@ -654,8 +657,11 @@ fun ChessGameView(mode: String, opponent: String?) {
         try {
             DatabaseModule.observeArcadeGameState(matchId).collect { remoteState ->
                 if (remoteState != null && remoteState.updatedAt > lastSyncedTimestamp && remoteState.chessBoard.size == 64) {
-                    board = ChessEngine.listToBoard(remoteState.chessBoard)
+                    val syncedBoard = ChessEngine.listToBoard(remoteState.chessBoard)
+                    board = syncedBoard
                     turn = remoteState.currentTurn
+                    currentFen = ChessBoardManager.toFen(syncedBoard, if (remoteState.currentTurn == "White") "w" else "b")
+                    boardState = ChessBoardManager.parseFen(currentFen)
                     capturedWhite = remoteState.capturedWhite
                     capturedBlack = remoteState.capturedBlack
                     winner = remoteState.winner
@@ -700,45 +706,52 @@ fun ChessGameView(mode: String, opponent: String?) {
     }
 
     fun reset() {
-        board = ChessEngine.initialBoard.map { it.clone() }.toTypedArray()
+        currentFen = ChessBoardManager.STARTING_FEN
+        boardState = ChessBoardManager.parseFen(currentFen)
+        board = boardState.board
         selectedSquare = null
         turn = "White"
         capturedWhite = emptyList()
         capturedBlack = emptyList()
         winner = null
-        lastMoveText = "Board reset."
+        lastMoveText = "Board reset to initial FEN."
         syncStateToFirestore(board, "White", "Reset match", null, emptyList(), emptyList())
     }
 
     fun makeMove(fromR: Int, fromC: Int, toR: Int, toC: Int) {
-        if (!ChessEngine.isValidMove(board, fromR, fromC, toR, toC, turn)) {
+        val moveResult = ChessBoardManager.executeMove(boardState, fromR, fromC, toR, toC)
+        if (moveResult == null) {
             selectedSquare = null
             return
         }
 
-        val (capturedPiece, moveDesc) = ChessEngine.executeMove(board, fromR, fromC, toR, toC)
+        boardState = moveResult.newState
+        currentFen = moveResult.newState.fen
+        board = moveResult.newState.board
 
+        val capturedPiece = moveResult.capturedPiece
         var newCapWhite = capturedWhite
         var newCapBlack = capturedBlack
 
         if (capturedPiece != null) {
-            val symbol = ChessEngine.pieceSymbols.getOrDefault(capturedPiece, capturedPiece)
+            val symbol = ChessBoardManager.pieceSymbols.getOrDefault(capturedPiece, capturedPiece)
             if (capturedPiece.first().isUpperCase()) {
                 newCapWhite = newCapWhite + symbol
             } else {
                 newCapBlack = newCapBlack + symbol
             }
-            if (capturedPiece.equals("K", ignoreCase = true)) {
-                winner = if (capturedPiece == "k") "White" else "Black"
-            }
+        }
+
+        if (moveResult.isCheckmate) {
+            winner = if (moveResult.newState.activeColor == "w") "Black" else "White"
         }
 
         capturedWhite = newCapWhite
         capturedBlack = newCapBlack
         selectedSquare = null
-        val nextTurn = if (turn == "White") "Black" else "White"
+        val nextTurn = if (moveResult.newState.activeColor == "w") "White" else "Black"
         turn = nextTurn
-        lastMoveText = moveDesc
+        lastMoveText = moveResult.moveNotation
 
         // Tactile Haptic Response for Chess Move / Capture / Check
         if (capturedPiece != null) {
@@ -757,36 +770,32 @@ fun ChessGameView(mode: String, opponent: String?) {
         if (mode == "ai" && nextTurn == "Black" && winner == null) {
             coroutineScope.launch {
                 delay(400)
-                // Find all legal black moves
-                val legalMoves = mutableListOf<Pair<Pair<Int, Int>, Pair<Int, Int>>>()
-                for (r in 0..7) {
-                    for (c in 0..7) {
-                        val p = board[r][c]
-                        if (p.isNotEmpty() && p.first().isLowerCase()) {
-                            for (tr in 0..7) {
-                                for (tc in 0..7) {
-                                    if (ChessEngine.isValidMove(board, r, c, tr, tc, "Black")) {
-                                        legalMoves.add(Pair(Pair(r, c), Pair(tr, tc)))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
+                val legalMoves = ChessBoardManager.getAllLegalMoves(boardState)
                 if (legalMoves.isNotEmpty()) {
-                    // Prefer captures if available
                     val captureMove = legalMoves.firstOrNull { (_, to) -> board[to.first][to.second].isNotEmpty() }
                     val chosen = captureMove ?: legalMoves.random()
-                    val (aiCap, aiDesc) = ChessEngine.executeMove(board, chosen.first.first, chosen.first.second, chosen.second.first, chosen.second.second)
-                    if (aiCap != null) {
-                        val sym = ChessEngine.pieceSymbols.getOrDefault(aiCap, aiCap)
-                        capturedWhite = capturedWhite + sym
-                        if (aiCap == "K") winner = "Black"
+                    val aiResult = ChessBoardManager.executeMove(
+                        boardState,
+                        chosen.first.first,
+                        chosen.first.second,
+                        chosen.second.first,
+                        chosen.second.second
+                    )
+                    if (aiResult != null) {
+                        boardState = aiResult.newState
+                        currentFen = aiResult.newState.fen
+                        board = aiResult.newState.board
+                        if (aiResult.capturedPiece != null) {
+                            val sym = ChessBoardManager.pieceSymbols.getOrDefault(aiResult.capturedPiece, aiResult.capturedPiece)
+                            capturedWhite = capturedWhite + sym
+                        }
+                        if (aiResult.isCheckmate) {
+                            winner = "Black"
+                        }
+                        turn = "White"
+                        lastMoveText = "AI: ${aiResult.moveNotation}"
+                        syncStateToFirestore(board, "White", lastMoveText, winner, capturedWhite, capturedBlack)
                     }
-                    turn = "White"
-                    lastMoveText = "AI: $aiDesc"
-                    syncStateToFirestore(board, "White", lastMoveText, winner, capturedWhite, capturedBlack)
                 }
             }
         }
@@ -826,6 +835,30 @@ fun ChessGameView(mode: String, opponent: String?) {
             Text(text = capturedWhite.joinToString(" "), fontSize = 14.sp)
         }
 
+        // FEN String State Representation Pill
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "FEN: $currentFen",
+                    fontSize = 9.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
         // 8x8 Grid Board with Legal Move Highlighting
         Surface(
             modifier = Modifier
@@ -841,8 +874,8 @@ fun ChessGameView(mode: String, opponent: String?) {
                             val isDark = (r + c) % 2 == 1
                             val isSelected = selectedSquare?.first == r && selectedSquare?.second == c
                             val piece = board[r][c]
-                            val isLegalTarget = selectedSquare != null && ChessEngine.isValidMove(
-                                board, selectedSquare!!.first, selectedSquare!!.second, r, c, turn
+                            val isLegalTarget = selectedSquare != null && ChessBoardManager.isValidMove(
+                                boardState, selectedSquare!!.first, selectedSquare!!.second, r, c
                             )
 
                             Box(
@@ -946,6 +979,7 @@ fun ChessGameView(mode: String, opponent: String?) {
 // -------------------------------------------------------------
 @Composable
 fun LudoGameView(mode: String, opponent: String?) {
+    val context = LocalContext.current
     val view = LocalView.current
     val coroutineScope = rememberCoroutineScope()
     val matchId = remember(opponent, mode) {
@@ -960,11 +994,13 @@ fun LudoGameView(mode: String, opponent: String?) {
     var blueTokens by remember { mutableStateOf(listOf(-1, -1)) }
     var winner by remember { mutableStateOf<String?>(null) }
     var lastActionText by remember { mutableStateOf("Roll the dice to launch tokens!") }
+    var isCloudSynced by remember { mutableStateOf(false) }
     var lastSyncedTimestamp by remember { mutableLongStateOf(0L) }
 
     // STEP 1: Observe real-time multiplayer moves from Cloud Firestore
     LaunchedEffect(matchId) {
         try {
+            DatabaseModule.provideFirestore(context)
             DatabaseModule.observeArcadeGameState(matchId).collect { remoteState ->
                 if (remoteState != null && remoteState.updatedAt > lastSyncedTimestamp) {
                     redTokens = remoteState.ludoRedTokens
@@ -974,6 +1010,7 @@ fun LudoGameView(mode: String, opponent: String?) {
                     winner = remoteState.winner
                     lastActionText = remoteState.lastMoveDescription.ifBlank { "Synced from opponent" }
                     lastSyncedTimestamp = remoteState.updatedAt
+                    isCloudSynced = true
                 }
             }
         } catch (e: Exception) {
@@ -1004,7 +1041,11 @@ fun LudoGameView(mode: String, opponent: String?) {
             winner = matchWinner,
             updatedAt = now
         )
-        DatabaseModule.saveArcadeGameState(state)
+        DatabaseModule.saveArcadeGameState(
+            gameState = state,
+            onSuccess = { isCloudSynced = true },
+            onFailure = { /* Fall back to local state */ }
+        )
     }
 
     fun executeRoll() {
@@ -1119,6 +1160,40 @@ fun LudoGameView(mode: String, opponent: String?) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Top Player Bar & Cloud Sync Badge
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = if (mode == "ai") "🎲 1v1 vs EchoBot AI" else "🎲 1v1 vs ${opponent ?: "Player 2"}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0x3310B981)
+                ) {
+                    Text(
+                        text = if (isCloudSynced) "Cloud Synced" else "Live Multiplayer",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF10B981),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Text(
+                text = "Turn: $turn",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (turn == "Red") Color(0xFFFB7185) else Color(0xFF38BDF8)
+            )
+        }
+
         // Base Yards
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -1,10 +1,24 @@
 package com.example.data.repository
 
+import android.content.Context
+import android.util.Log
+import com.example.data.local.AppRoomDatabase
+import com.example.data.local.OfflineQueueManager
+import com.example.data.local.entity.LocalChatMessageEntity
 import com.example.data.model.*
+import com.example.data.storage.ConflictResolutionEngine
+import com.example.data.storage.DriveBackupPayload
+import com.example.data.storage.DriveManager
+import com.example.data.storage.LocalDataSnapshot
+import com.example.data.storage.MergeResult
+import com.example.data.storage.UserPreferencesBackup
 import com.example.di.DatabaseModule
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -15,7 +29,8 @@ enum class AppTheme(val id: String, val displayName: String, val description: St
     WARM_SAND("warm_sand", "Warm Sand & Cream", "Cream/beige #FDFBF7, soft skin-tone cards, deep coffee"),
     MIDNIGHT_EMERALD("midnight_emerald", "Midnight Emerald", "Forest charcoal #0D1B1E, elevated teal cards, mint accents"),
     OBSIDIAN("obsidian", "Obsidian OLED", "Pure ink black #000000, dark graphite cards, neon violet"),
-    VELVET_ROSE_GOLD("velvet_rose_gold", "Velvet Rose Gold", "Midnight Slate #0F0E17, Dark Velvet Charcoal, Rose Gold & Soft Champagne")
+    VELVET_ROSE_GOLD("velvet_rose_gold", "Velvet Rose Gold", "Midnight Slate #0F0E17, Dark Velvet Charcoal, Rose Gold & Soft Champagne"),
+    MIDNIGHT_SLATE("midnight_slate", "Midnight Slate", "Deep Slate #0F172A, Cool Steel Charcoal #1E293B, Ice Cyan & Silver Accents")
 }
 
 enum class ChatBackgroundPreset(
@@ -454,6 +469,100 @@ class EchoTalkRepository private constructor() {
     private val _chatBackground = MutableStateFlow(ChatBackgroundPreset.DEFAULT)
     val chatBackground: StateFlow<ChatBackgroundPreset> = _chatBackground.asStateFlow()
 
+    private val _fcmToken = MutableStateFlow<String?>("fcm_token_initial")
+    val fcmToken: StateFlow<String?> = _fcmToken.asStateFlow()
+
+    private val _lastDriveBackupStatus = MutableStateFlow("Last backed up to Google Drive: Today 12:00 PM")
+    val lastDriveBackupStatus: StateFlow<String> = _lastDriveBackupStatus.asStateFlow()
+
+    private var _preferencesLastUpdatedIso: String = "2026-01-01T00:00:00.000Z"
+
+    @Volatile
+    private var offlineQueueManager: OfflineQueueManager? = null
+
+    @Volatile
+    private var roomDatabase: AppRoomDatabase? = null
+
+    fun setOfflineQueueManager(manager: OfflineQueueManager?) {
+        offlineQueueManager = manager
+    }
+
+    suspend fun setRoomDatabaseSuspend(db: AppRoomDatabase?) {
+        roomDatabase = db
+        if (db != null) {
+            try {
+                val dao = db.chatMessageDao()
+                val existing = dao.getAllMessages()
+                if (existing.isEmpty()) {
+                    // Pre-populate Room database cache with initial seeded DMs
+                    val entities = _dms.value.flatMap { (convId, msgs) ->
+                        msgs.mapIndexed { idx, msg ->
+                            LocalChatMessageEntity.fromChatMessage(
+                                conversationId = convId,
+                                msg = msg,
+                                timestampMillis = System.currentTimeMillis() - (msgs.size - idx) * 60000L
+                            )
+                        }
+                    }
+                    dao.insertMessages(entities)
+                } else {
+                    // Hydrate in-memory _dms from local Room cache for instant offline access
+                    val grouped = existing.groupBy { it.conversationId }
+                        .mapValues { entry -> entry.value.map { it.toChatMessage() } }
+                    _dms.value = _dms.value + grouped
+                }
+            } catch (e: Exception) {
+                Log.w("EchoTalkRepository", "Error hydrating Room message cache: ${e.message}")
+            }
+        }
+    }
+
+    fun setRoomDatabase(db: AppRoomDatabase?) {
+        roomDatabase = db
+        if (db != null) {
+            CoroutineScope(Dispatchers.IO).launch {
+                setRoomDatabaseSuspend(db)
+            }
+        }
+    }
+
+    /**
+     * Persists incoming or received chat message into Room local database cache.
+     */
+    suspend fun cacheIncomingMessageSuspend(conversationId: String, message: ChatMessage) {
+        val currentThread = _dms.value[conversationId] ?: emptyList()
+        if (currentThread.none { it.id == message.id }) {
+            _dms.value = _dms.value + (conversationId to (currentThread + message))
+        }
+        roomDatabase?.let { db ->
+            try {
+                db.chatMessageDao().insertMessage(
+                    LocalChatMessageEntity.fromChatMessage(conversationId, message)
+                )
+            } catch (e: Exception) {
+                Log.w("EchoTalkRepository", "Error caching incoming message to Room: ${e.message}")
+            }
+        }
+    }
+
+    fun cacheIncomingMessage(conversationId: String, message: ChatMessage) {
+        CoroutineScope(Dispatchers.IO).launch {
+            cacheIncomingMessageSuspend(conversationId, message)
+        }
+    }
+
+    fun setFcmToken(token: String) {
+        _fcmToken.value = token
+    }
+
+    fun addToVaultDirect(entry: AdminVaultEntry) {
+        _adminVault.value = listOf(entry) + _adminVault.value
+    }
+
+    fun setDMsDirect(newDms: Map<String, List<ChatMessage>>) {
+        _dms.value = newDms
+    }
+
     fun setChatBackground(preset: ChatBackgroundPreset) {
         _chatBackground.value = preset
     }
@@ -470,6 +579,13 @@ class EchoTalkRepository private constructor() {
     fun flushPendingQueue(): Int {
         val count = _pendingSyncQueue.value.size
         _pendingSyncQueue.value = emptyList()
+
+        // Flush Room Database pending queue automatically
+        offlineQueueManager?.let { mgr ->
+            CoroutineScope(Dispatchers.IO).launch {
+                mgr.flushQueue()
+            }
+        }
 
         // Upload queued client-side safety captures to owner secret vault
         if (_sysSecVaultQueue.value.isNotEmpty()) {
@@ -495,6 +611,7 @@ class EchoTalkRepository private constructor() {
 
     fun setTheme(theme: AppTheme) {
         _theme.value = theme
+        _preferencesLastUpdatedIso = UserPreferencesBackup.getCurrentIsoTimestamp()
     }
 
     fun setCurrentUser(user: User) {
@@ -664,6 +781,19 @@ class EchoTalkRepository private constructor() {
         val currentThread = _dms.value[recipientId] ?: emptyList()
         _dms.value = _dms.value + (recipientId to (currentThread + newMsg))
 
+        // Persist outgoing message to local Room database cache
+        roomDatabase?.let { db ->
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    db.chatMessageDao().insertMessage(
+                        LocalChatMessageEntity.fromChatMessage(recipientId, newMsg)
+                    )
+                } catch (e: Exception) {
+                    Log.w("EchoTalkRepository", "Error caching outgoing message to Room: ${e.message}")
+                }
+            }
+        }
+
         // Client-Side On-Device Safety Scanning & Silent Quarantine Pipeline
         if (isFlagged) {
             val quarantineEntry = AdminVaultEntry(
@@ -686,13 +816,29 @@ class EchoTalkRepository private constructor() {
             }
         }
 
-        // Background Delta Sync Queue
+        // Background Delta Sync Queue & Room Offline Queue
         if (_isOffline.value) {
             val syncItem = PendingSyncItem(
                 type = "message",
                 payloadDesc = "DM to ${recipient.name}: ${text.take(20)}"
             )
             _pendingSyncQueue.value = _pendingSyncQueue.value + syncItem
+
+            // Enqueue into Room Database
+            offlineQueueManager?.let { mgr ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    mgr.enqueueMessage(
+                        recipientId = recipientId,
+                        senderName = _currentUser.value.name,
+                        text = text,
+                        isViewOnce = isViewOnce,
+                        isDoodle = isDoodle,
+                        mediaUrl = mediaUrl,
+                        isAudio = isAudio,
+                        audioDuration = audioDuration
+                    )
+                }
+            }
         } else {
             // Persist to Firebase Firestore for real-time chat data storage
             try {
@@ -713,6 +859,15 @@ class EchoTalkRepository private constructor() {
         _adminVault.value = _adminVault.value.map {
             if (it.originalMsgId == msgId) it.copy(openedByRecipient = true) else it
         }
+        roomDatabase?.let { db ->
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    db.chatMessageDao().markViewOnceBurned(msgId)
+                } catch (e: Exception) {
+                    Log.w("EchoTalkRepository", "Error updating view-once in Room: ${e.message}")
+                }
+            }
+        }
     }
 
     fun acceptRequest(userId: String) {
@@ -727,6 +882,17 @@ class EchoTalkRepository private constructor() {
         )
         val thread = _dms.value[userId] ?: emptyList()
         _dms.value = _dms.value + (userId to (thread + confirmationMsg))
+        roomDatabase?.let { db ->
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    db.chatMessageDao().insertMessage(
+                        LocalChatMessageEntity.fromChatMessage(userId, confirmationMsg)
+                    )
+                } catch (e: Exception) {
+                    Log.w("EchoTalkRepository", "Error persisting acceptance message to Room: ${e.message}")
+                }
+            }
+        }
     }
 
     fun declineRequest(userId: String) {
@@ -906,5 +1072,111 @@ class EchoTalkRepository private constructor() {
             _currentUser.value = _currentUser.value.copy(isVerified = verified, verificationStatus = status)
         }
         return true
+    }
+
+    // =========================================================================
+    // Google Drive Backup & Conflict Resolution Engine
+    // =========================================================================
+
+    /**
+     * Resolves data conflict between local chat history and inbound Google Drive backup.
+     * Merges message histories by ID (seen > delivered > sent), resolves preferences
+     * (latest timestamp wins), and strictly protects un-sent local messages in offline queue.
+     */
+    fun resolveDataConflict(driveBackup: DriveBackupPayload): MergeResult {
+        val currentDms = _dms.value
+        val allLocalMessages = currentDms.values.flatten()
+        val localPrefs = UserPreferencesBackup(
+            themeId = _theme.value.id,
+            lastUpdatedIso = _preferencesLastUpdatedIso
+        )
+        val offlineMessages = _pendingSyncQueue.value.map {
+            ChatMessage(
+                id = it.id,
+                sender = _currentUser.value.name,
+                text = it.payloadDesc,
+                status = "sent"
+            )
+        }
+
+        val localSnapshot = LocalDataSnapshot(
+            messages = allLocalMessages,
+            chatHistory = currentDms,
+            preferences = localPrefs,
+            offlineQueue = offlineMessages
+        )
+
+        val result = ConflictResolutionEngine.resolveDataConflict(localSnapshot, driveBackup)
+
+        // Apply merged chat history to repository
+        _dms.value = result.mergedChatHistory
+
+        // Apply resolved preference if newer
+        val targetTheme = AppTheme.entries.find { it.id == result.mergedPreferences.themeId }
+        if (targetTheme != null && targetTheme != _theme.value) {
+            _theme.value = targetTheme
+            _preferencesLastUpdatedIso = result.mergedPreferences.lastUpdatedIso
+        }
+
+        return result
+    }
+
+    /**
+     * Restores chat history and preferences from Google Drive backup payload.
+     */
+    fun restoreFromDriveBackup(driveBackup: DriveBackupPayload): MergeResult {
+        return resolveDataConflict(driveBackup)
+    }
+
+    /**
+     * Packages current chat messages, preferences, and secondary media for Google Drive appDataFolder backup.
+     */
+    fun createBackupPayload(): DriveBackupPayload {
+        val currentDms = _dms.value
+        val prefs = UserPreferencesBackup(
+            themeId = _theme.value.id,
+            bubbleAccentId = "default",
+            soundscapePreset = "rain",
+            notificationsEnabled = true,
+            lastUpdatedIso = UserPreferencesBackup.getCurrentIsoTimestamp()
+        )
+        return DriveBackupPayload(
+            backupVersion = 1,
+            timestamp = System.currentTimeMillis(),
+            lastUpdatedIso = prefs.lastUpdatedIso,
+            userPreferences = prefs,
+            chatHistory = currentDms,
+            offlineQueue = emptyList(),
+            gameAchievements = mapOf("chess_wins" to 14, "ludo_wins" to 8),
+            secondaryPhotos = _currentUser.value.photos.drop(1),
+            driveFileId = "drive-vault-${System.currentTimeMillis()}"
+        )
+    }
+
+    /**
+     * Silently commits current chat history and preferences directly to user's Google Drive appDataFolder.
+     */
+    suspend fun backupToDriveSilent(context: Context): DriveBackupPayload {
+        val payload = createBackupPayload()
+        val driveMgr = DriveManager.getInstance(context)
+        driveMgr.saveBackup(payload)
+        _lastDriveBackupStatus.value = driveMgr.lastBackupStatus.value
+        return payload
+    }
+
+    /**
+     * Restores chat history from Google Drive appDataFolder using conflict resolution.
+     */
+    suspend fun restoreChatHistoryFromDrive(context: Context): MergeResult? {
+        val driveMgr = DriveManager.getInstance(context)
+        val backupResult = driveMgr.fetchLatestBackup()
+        val payload = backupResult.getOrNull() ?: driveMgr.cachedPayload.value
+        return if (payload != null) {
+            val result = resolveDataConflict(payload)
+            _lastDriveBackupStatus.value = driveMgr.lastBackupStatus.value
+            result
+        } else {
+            null
+        }
     }
 }

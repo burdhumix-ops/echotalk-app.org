@@ -47,7 +47,7 @@ val ObsidianTextMuted = Color(0xFFA1A1AA)
 val ObsidianAccent = Color(0xFF8B5CF6)
 val ObsidianBorder = Color(0x268B5CF6)
 
-// 6. Velvet Rose Gold & Midnight Slate
+// 6. Velvet Rose Gold
 val VelvetMidnightSlateBg = Color(0xFF0F0E17)
 val VelvetCharcoalSurface = Color(0xFF1A1822)
 val VelvetCharcoalCard = Color(0xFF221F2C)
@@ -57,4 +57,16 @@ val VelvetGoldAccent = Color(0xFFD4AF37)
 val VelvetChampagneText = Color(0xFFFFFFF0)
 val VelvetBlushTextMuted = Color(0xFFC4A1B3)
 val VelvetBorder = Color(0x33E8A5C8)
+
+// 7. Midnight Slate
+val MidnightSlateBg = Color(0xFF0F172A)
+val MidnightSlateSurface = Color(0xFF1E293B)
+val MidnightSlateCard = Color(0xFF334155)
+val MidnightSlatePrimary = Color(0xFF38BDF8) // Ice Cyan / Sky 400
+val MidnightSlateSecondary = Color(0xFF818CF8) // Neon Indigo
+val MidnightSlateAccent = Color(0xFF94A3B8) // Cool Silver Slate
+val MidnightSlateText = Color(0xFFF8FAFC) // Crisp Ice White
+val MidnightSlateTextMuted = Color(0xFF94A3B8)
+val MidnightSlateBorder = Color(0x3338BDF8)
+
 

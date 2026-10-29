@@ -89,6 +89,20 @@ fun getColorSchemeForTheme(theme: AppTheme): ColorScheme {
             outline = VelvetBorder,
             outlineVariant = Color(0x26E8A5C8)
         )
+        AppTheme.MIDNIGHT_SLATE -> darkColorScheme(
+            primary = MidnightSlatePrimary,
+            onPrimary = MidnightSlateBg,
+            secondary = MidnightSlateSecondary,
+            tertiary = MidnightSlateAccent,
+            background = MidnightSlateBg,
+            surface = MidnightSlateSurface,
+            surfaceVariant = MidnightSlateCard,
+            onBackground = MidnightSlateText,
+            onSurface = MidnightSlateText,
+            onSurfaceVariant = MidnightSlateTextMuted,
+            outline = MidnightSlateBorder,
+            outlineVariant = Color(0x2638BDF8)
+        )
     }
 }
 
@@ -97,10 +111,5 @@ fun EchoTalkTheme(
     theme: AppTheme = AppTheme.IOS_GLASS,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = getColorSchemeForTheme(theme)
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    DynamicThemeProvider(theme = theme, content = content)
 }

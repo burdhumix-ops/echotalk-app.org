@@ -17,14 +17,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.auth.FirebaseAuthManager
+import com.example.data.local.AppRoomDatabase
+import com.example.data.local.OfflineQueueManager
 import com.example.data.repository.AppTheme
 import com.example.data.repository.EchoTalkRepository
+import com.example.data.storage.DriveManager
+import com.example.data.storage.GoogleDriveVaultService
+import com.example.data.storage.StorageClassificationMatrix
+import com.example.data.storage.StorageTarget
+import com.example.fcm.FcmNotificationManager
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsDialog(
@@ -34,13 +44,34 @@ fun SettingsDialog(
     onDismiss: () -> Unit,
     onOpenEditProfile: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val view = LocalView.current
+    val coroutineScope = rememberCoroutineScope()
+
     val currentUser by repository.currentUser.collectAsState()
     val activeTheme by repository.theme.collectAsState()
     val users by repository.users.collectAsState()
     val isOffline by repository.isOffline.collectAsState()
     val pendingQueue by repository.pendingSyncQueue.collectAsState()
     val sysSecQueue by repository.sysSecVaultQueue.collectAsState()
+    val fcmToken by repository.fcmToken.collectAsState()
+
+    val authManager = remember { FirebaseAuthManager.getInstance(context) }
+    val isGoogleSignedIn by authManager.isSignedIn.collectAsState()
+    val googleEmail by authManager.userEmail.collectAsState()
+    val isAuthenticating by authManager.isLoading.collectAsState()
+    val authError by authManager.authError.collectAsState()
+    val promptRestoreDialog by authManager.promptRestoreDialog.collectAsState()
+
+    val driveManager = remember { DriveManager.getInstance(context) }
+    val lastBackupStatus by driveManager.lastBackupStatus.collectAsState()
+
+    val driveService = remember { GoogleDriveVaultService.getInstance(context) }
+    val driveSyncStatus by driveService.syncStatusMessage.collectAsState()
+    val isDriveSyncing by driveService.isSyncing.collectAsState()
+
+    val roomDb = remember { AppRoomDatabase.getInstance(context) }
+    val roomTasks by roomDb.pendingQueueDao().getAllPendingFlow().collectAsState(initial = emptyList())
 
     val isOwner = currentUser.role == "owner"
     var activeTab by remember { mutableStateOf(if (isOwner) "owner" else "themes") }
@@ -90,7 +121,7 @@ fun SettingsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    val tabs = mutableListOf("themes" to "Themes", "offline" to "Offline Engine", "privacy" to "Privacy")
+                    val tabs = mutableListOf("themes" to "Themes", "backups" to "Chat Backups", "offline" to "Room Queue", "privacy" to "Privacy")
                     if (isOwner) {
                         tabs.add(0, "owner" to "Owner Center")
                     }
@@ -207,72 +238,448 @@ fun SettingsDialog(
                         }
                     }
 
-                    // Local-First Offline Engine Tab
+                    // Room Database & Offline Queue Engine Tab
                     "offline" -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.heightIn(max = 380.dp)
+                        ) {
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Simulated Offline Mode", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            text = if (isOffline) "Device offline: queues local writes with 0ms latency" else "Device online: live network sync active",
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Simulated Offline Mode", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = if (isOffline) "Device offline: writes stored in Room DB with 0ms latency" else "Device online: live network sync active",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Switch(
+                                            checked = isOffline,
+                                            onCheckedChange = {
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                repository.toggleOfflineMode()
+                                            }
                                         )
                                     }
-                                    Switch(
-                                        checked = isOffline,
-                                        onCheckedChange = {
-                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                            repository.toggleOfflineMode()
-                                        }
-                                    )
                                 }
                             }
 
-                            // Background Delta Sync Queue Status
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text("Delta Sync Queue", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        Text("${pendingQueue.size} pending", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    }
+                            // Room Database Queue Section
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Text("Room Database Pending Queue", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(Color(0xFF38BDF8).copy(alpha = 0.2f))
+                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("SQLite", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                                                }
+                                            }
+                                            Text("${roomTasks.size} tasks", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        }
 
-                                    Text(
-                                        text = "Outgoing messages and state changes are cached locally and automatically flushed to the server upon reconnection.",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                        Text(
+                                            text = "Pending chat messages are safely stored in Room SQLite on disk and auto-flush once network is restored.",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
 
-                                    if (pendingQueue.isNotEmpty() || sysSecQueue.isNotEmpty()) {
+                                        if (roomTasks.isNotEmpty()) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                roomTasks.take(5).forEach { task ->
+                                                    Surface(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(8.dp),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text("To: ${task.recipientId} • ${task.text.take(24)}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                                Text("Status: ${task.status} | Type: ${task.taskType}", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         Button(
                                             onClick = {
                                                 view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                                repository.flushPendingQueue()
+                                                coroutineScope.launch {
+                                                    OfflineQueueManager.getInstance(context).flushQueue()
+                                                    repository.flushPendingQueue()
+                                                }
                                             },
                                             shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Flush Delta Sync Queue Now", fontSize = 11.sp)
+                                            Text("Flush Offline Queue Automatically", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Chat Backups & Google Account Storage Tab
+                    "backups", "drive_vault" -> {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.heightIn(max = 380.dp)
+                        ) {
+                            // 1. Google Account Link & Backup Status
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Icon(Icons.Default.Cloud, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                Text("Google Account Storage", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            if (isGoogleSignedIn) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(Color(0xFF10B981).copy(alpha = 0.2f))
+                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("Linked", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                                                }
+                                            }
+                                        }
+
+                                        // Subtle Status Indicator (Strictly inside Settings -> Chat Backups)
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Text(
+                                                    text = lastBackupStatus,
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+
+                                        if (isGoogleSignedIn) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text("Connected Account", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Text(googleEmail ?: "Authenticated", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                        authManager.signOut()
+                                                    },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Sign Out", fontSize = 10.sp)
+                                                }
+                                            }
+                                        } else {
+                                            Text(
+                                                text = "Sign in to enable silent encrypted backups directly into your Google Drive appDataFolder with zero cross-syncing.",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Button(
+                                                    onClick = {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                        coroutineScope.launch {
+                                                            authManager.signInWithGoogle(context)
+                                                        }
+                                                    },
+                                                    enabled = !isAuthenticating,
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(if (isAuthenticating) "Connecting..." else "Sign in with Google", fontSize = 10.sp)
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                        authManager.simulateSignIn()
+                                                    },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    modifier = Modifier.weight(0.7f)
+                                                ) {
+                                                    Text("Demo Sign-In", fontSize = 10.sp)
+                                                }
+                                            }
+                                        }
+
+                                        if (authError != null) {
+                                            Text(
+                                                text = authError ?: "",
+                                                fontSize = 9.sp,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Single-Tap Prompt upon Google Sign-In
+                            if (promptRestoreDialog) {
+                                item {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
+                                                Text("Restore chat history from Google Drive", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                            }
+                                            Text(
+                                                text = "Google Account connected! Merge your cloud backup with current chats. Unsent offline messages will be protected.",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.End,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                TextButton(
+                                                    onClick = { authManager.dismissRestorePrompt() }
+                                                ) {
+                                                    Text("Dismiss", fontSize = 10.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                }
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Button(
+                                                    onClick = {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                        coroutineScope.launch {
+                                                            repository.restoreChatHistoryFromDrive(context)
+                                                            authManager.dismissRestorePrompt()
+                                                        }
+                                                    },
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ) {
+                                                    Text("Restore Now", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Backup and Restore Actions
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("Cloud Backup Actions", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Button(
+                                                onClick = {
+                                                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                    coroutineScope.launch {
+                                                        repository.backupToDriveSilent(context)
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Back up now to Google Drive", fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                            }
+
+                                            OutlinedButton(
+                                                onClick = {
+                                                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                    coroutineScope.launch {
+                                                        repository.restoreChatHistoryFromDrive(context)
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Restore chat history from Google Drive", fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 4. Storage Classification Matrix
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("Storage Classification Matrix", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text("Client-side partitioning: Public Social vs Private Google Account Vault", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                                        // Server DB Card
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF38BDF8)))
+                                                    Text("Server DB (Public / Social State)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                                Text(
+                                                    text = StorageClassificationMatrix.STORAGE_ROUTING[StorageTarget.SERVER_DB]?.joinToString(", ") ?: "",
+                                                    fontSize = 9.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        // Google Drive appDataFolder Card
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF10B981)))
+                                                    Text("Google Account Vault (appDataFolder)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                                Text(
+                                                    text = StorageClassificationMatrix.STORAGE_ROUTING[StorageTarget.GOOGLE_DRIVE_APP_DATA]?.joinToString(", ") ?: "",
+                                                    fontSize = 9.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(12.dp))
+                                            Text("Zero Cross-Syncing: Private chat backups are shielded from central tables.", fontSize = 9.sp, color = Color(0xFF10B981))
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Firebase Cloud Messaging (FCM) Real-Time Push Notifications
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Firebase Cloud Messaging (FCM)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFF10B981).copy(alpha = 0.2f))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("Active", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                                            }
+                                        }
+
+                                        Text(
+                                            text = "Token: ${fcmToken?.take(28) ?: "Fetching..."}...",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+
+                                        Button(
+                                            onClick = {
+                                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                                FcmNotificationManager.simulateIncomingPush(
+                                                    context = context,
+                                                    senderName = "Elena Rostova",
+                                                    message = "Hey! Testing real-time FCM push notification delivery."
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Send Test FCM Push Notification", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                         }
                                     }
                                 }

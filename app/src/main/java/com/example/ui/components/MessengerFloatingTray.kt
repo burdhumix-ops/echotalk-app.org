@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.ChatMessage
+import com.example.utils.PoliteSoundSynthesizer
 import kotlinx.coroutines.delay
 
 @Composable
@@ -61,6 +62,7 @@ fun MessengerFloatingTray(
 
     LaunchedEffect(Unit) {
         isEntering = true
+        PoliteSoundSynthesizer.playPopSound()
         // Sequential staggered emoji pop-up: stagger 0.03s (30ms)
         for (i in 1..emojis.size) {
             revealedEmojiCount = i
